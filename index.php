@@ -6,6 +6,5 @@
  * Time: 下午3:13
  */
 
-function getInt():int{
-
-}
+define('APP_PATH','./App/');
+require '../ThinkPHP/ThinkPHP.php';
