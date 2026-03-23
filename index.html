@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>星核收集者 - 3D 小游戏</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111f;
+      --panel: rgba(8, 15, 32, 0.82);
+      --accent: #56e0ff;
+      --accent-2: #8bff96;
+      --danger: #ff6b81;
+      --text: #f4f8ff;
+      --muted: #a3b5d1;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: radial-gradient(circle at top, #122544 0%, var(--bg) 55%, #02060b 100%); font-family: "Segoe UI", "PingFang SC", sans-serif; color: var(--text); }
+    body { overflow: hidden; }
+    #game { width: 100vw; height: 100vh; display: block; }
+    .hud, .overlay { position: fixed; inset: 0; pointer-events: none; }
+    .topbar {
+      position: absolute; top: 20px; left: 20px; display: grid; gap: 12px; max-width: min(360px, calc(100vw - 40px));
+    }
+    .panel {
+      background: var(--panel); border: 1px solid rgba(255,255,255,0.12); border-radius: 18px; padding: 14px 16px; backdrop-filter: blur(14px); box-shadow: 0 14px 40px rgba(0,0,0,0.28);
+    }
+    .panel h1 { margin: 0 0 8px; font-size: 1.2rem; }
+    .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .stat { background: rgba(255,255,255,0.04); border-radius: 14px; padding: 10px 12px; }
+    .stat strong { display: block; font-size: 1.15rem; color: var(--accent); }
+    .stat span { color: var(--muted); font-size: 0.88rem; }
+    .panel ul { margin: 10px 0 0 18px; padding: 0; color: var(--muted); line-height: 1.55; }
+    .message {
+      position: absolute; right: 20px; top: 20px; min-width: 240px; max-width: min(360px, calc(100vw - 40px));
+      background: rgba(86, 224, 255, 0.14); border-color: rgba(86, 224, 255, 0.35); opacity: 0; transform: translateY(-10px); transition: 220ms ease; pointer-events: none;
+    }
+    .message.show { opacity: 1; transform: translateY(0); }
+    .message.danger { background: rgba(255, 107, 129, 0.15); border-color: rgba(255, 107, 129, 0.35); }
+    .center-card {
+      position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; pointer-events: auto;
+    }
+    .card {
+      width: min(560px, calc(100vw - 32px)); background: rgba(5, 10, 22, 0.86); border: 1px solid rgba(255,255,255,0.14); border-radius: 24px; padding: 28px; text-align: center; box-shadow: 0 30px 80px rgba(0,0,0,0.42); backdrop-filter: blur(16px);
+    }
+    .card h2 { margin: 0 0 12px; font-size: clamp(1.6rem, 4vw, 2.4rem); }
+    .card p { margin: 0 0 16px; line-height: 1.65; color: var(--muted); }
+    .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+    button {
+      pointer-events: auto; border: none; cursor: pointer; padding: 12px 18px; border-radius: 999px; font-size: 0.95rem; font-weight: 700; transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    .primary { background: linear-gradient(135deg, var(--accent), #5a8cff); color: #04111b; box-shadow: 0 14px 28px rgba(52, 171, 255, 0.35); }
+    .secondary { background: rgba(255,255,255,0.08); color: var(--text); }
+    .hide { display: none !important; }
+    .footer-tip {
+      position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.65); font-size: 0.9rem; background: rgba(0,0,0,0.22); padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.08);
+    }
+    @media (max-width: 720px) {
+      .stats { grid-template-columns: 1fr; }
+      .topbar, .message { left: 16px; right: 16px; max-width: none; }
+      .message { top: auto; bottom: 72px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div class="hud">
+    <div class="topbar">
+      <div class="panel">
+        <h1>星核收集者</h1>
+        <div class="stats">
+          <div class="stat">
+            <strong id="score">0 / 6</strong>
+            <span>已收集星核</span>
+          </div>
+          <div class="stat">
+            <strong id="time">60.0s</strong>
+            <span>剩余时间</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <strong>操作说明</strong>
+        <ul>
+          <li>W/A/S/D 或方向键移动飞船。</li>
+          <li>按住 Shift 可短暂加速。</li>
+          <li>收集全部 6 个星核并躲开巡逻无人机。</li>
+        </ul>
+      </div>
+    </div>
+    <div id="toast" class="panel message"></div>
+    <div class="footer-tip">提示：点击“开始游戏”后，使用键盘操控。</div>
+  </div>
+
+  <div id="startOverlay" class="overlay">
+    <div class="center-card">
+      <div class="card">
+        <h2>欢迎来到《星核收集者》</h2>
+        <p>这是一个浏览器里的 3D 小游戏：你需要在限定时间内收集全部星核，并避开会碰撞扣时间的巡逻无人机。</p>
+        <p>如果你想继续扩展，这个原型已经具备：3D 场景、角色移动、第三人称相机、收集目标、敌人巡逻、计时与胜负逻辑。</p>
+        <div class="actions">
+          <button id="startBtn" class="primary">开始游戏</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="resultOverlay" class="overlay hide">
+    <div class="center-card">
+      <div class="card">
+        <h2 id="resultTitle">任务完成</h2>
+        <p id="resultText"></p>
+        <div class="actions">
+          <button id="restartBtn" class="primary">再来一局</button>
+          <button id="backBtn" class="secondary">返回说明</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.160.1/build/three.module.js';
+
+    const canvas = document.getElementById('game');
+    const scoreEl = document.getElementById('score');
+    const timeEl = document.getElementById('time');
+    const toastEl = document.getElementById('toast');
+    const startOverlay = document.getElementById('startOverlay');
+    const resultOverlay = document.getElementById('resultOverlay');
+    const resultTitle = document.getElementById('resultTitle');
+    const resultText = document.getElementById('resultText');
+    const startBtn = document.getElementById('startBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const backBtn = document.getElementById('backBtn');
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x07111f, 28, 58);
+
+    const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 120);
+    camera.position.set(0, 9, 12);
+
+    const clock = new THREE.Clock();
+    const keys = {};
+
+    const config = {
+      totalCollectibles: 6,
+      baseTime: 60,
+      playerSpeed: 8,
+      sprintMultiplier: 1.7,
+      hitPenalty: 6,
+      arenaHalf: 14,
+      playerRadius: 0.75,
+      droneRadius: 0.8,
+      collectibleRadius: 0.9,
+    };
+
+    const state = {
+      started: false,
+      ended: false,
+      score: 0,
+      timeLeft: config.baseTime,
+      playerVelocity: new THREE.Vector3(),
+      lastHitAt: -Infinity,
+    };
+
+    const world = {
+      collectibles: [],
+      drones: [],
+      deco: [],
+    };
+
+    const ambient = new THREE.AmbientLight(0x8fb6ff, 1.1);
+    scene.add(ambient);
+
+    const moonLight = new THREE.DirectionalLight(0xffffff, 1.6);
+    moonLight.position.set(8, 16, 10);
+    moonLight.castShadow = true;
+    moonLight.shadow.mapSize.set(2048, 2048);
+    moonLight.shadow.camera.near = 0.5;
+    moonLight.shadow.camera.far = 60;
+    moonLight.shadow.camera.left = -24;
+    moonLight.shadow.camera.right = 24;
+    moonLight.shadow.camera.top = 24;
+    moonLight.shadow.camera.bottom = -24;
+    scene.add(moonLight);
+
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(18, 64),
+      new THREE.MeshStandardMaterial({ color: 0x0f2742, metalness: 0.05, roughness: 0.9 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    const grid = new THREE.GridHelper(34, 34, 0x5dd4ff, 0x1a4672);
+    grid.position.y = 0.02;
+    grid.material.opacity = 0.35;
+    grid.material.transparent = true;
+    scene.add(grid);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(18.4, 0.14, 18, 120),
+      new THREE.MeshStandardMaterial({ color: 0x2ec5ff, emissive: 0x0d3955, roughness: 0.4, metalness: 0.8 })
+    );
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.08;
+    scene.add(ring);
+
+    const player = createPlayer();
+    scene.add(player.group);
+
+    createDecorations();
+    createCollectibles();
+    createDrones();
+    resetGame(true);
+
+    function createPlayer() {
+      const group = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.7, 1.4, 6, 14),
+        new THREE.MeshStandardMaterial({ color: 0x7ce7ff, emissive: 0x12384f, roughness: 0.25, metalness: 0.5 })
+      );
+      body.castShadow = true;
+      group.add(body);
+
+      const cockpit = new THREE.Mesh(
+        new THREE.SphereGeometry(0.38, 18, 18),
+        new THREE.MeshStandardMaterial({ color: 0xeefbff, emissive: 0x1c5871, roughness: 0.12, metalness: 0.15 })
+      );
+      cockpit.position.set(0, 0.55, 0.18);
+      cockpit.scale.set(1, 0.9, 1.15);
+      cockpit.castShadow = true;
+      group.add(cockpit);
+
+      const glow = new THREE.PointLight(0x56e0ff, 1.6, 8, 2);
+      glow.position.set(0, 1.2, 0);
+      group.add(glow);
+
+      group.position.set(0, 1.15, 0);
+      return { group, body, glow };
+    }
+
+    function createCollectibles() {
+      const positions = [
+        [-9, -7], [-5, 8], [0, -11], [4, 5], [9, -1], [11, 8],
+      ];
+      positions.forEach((pos, index) => {
+        const root = new THREE.Group();
+        const core = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.65, 0),
+          new THREE.MeshStandardMaterial({ color: 0x8bff96, emissive: 0x29592f, roughness: 0.2, metalness: 0.4 })
+        );
+        core.castShadow = true;
+        root.add(core);
+
+        const halo = new THREE.Mesh(
+          new THREE.TorusGeometry(0.95, 0.08, 12, 32),
+          new THREE.MeshStandardMaterial({ color: 0x56e0ff, emissive: 0x0d4854, roughness: 0.35, metalness: 0.8 })
+        );
+        halo.rotation.x = Math.PI / 2;
+        root.add(halo);
+
+        const light = new THREE.PointLight(0x8bff96, 1.1, 6, 2);
+        light.position.y = 0.4;
+        root.add(light);
+
+        root.position.set(pos[0], 1.25 + (index % 2) * 0.2, pos[1]);
+        scene.add(root);
+        world.collectibles.push({ root, core, halo, active: true, floatOffset: Math.random() * Math.PI * 2 });
+      });
+    }
+
+    function createDrones() {
+      const drones = [
+        { center: new THREE.Vector3(-6, 1.2, 0), radius: 5.2, speed: 0.85, phase: 0.2 },
+        { center: new THREE.Vector3(7, 1.2, 3), radius: 4.1, speed: -1.15, phase: 1.4 },
+        { center: new THREE.Vector3(2, 1.2, -8), radius: 3.5, speed: 1.35, phase: 2.3 },
+      ];
+      drones.forEach((item, idx) => {
+        const group = new THREE.Group();
+        const shell = new THREE.Mesh(
+          new THREE.SphereGeometry(0.75, 18, 18),
+          new THREE.MeshStandardMaterial({ color: 0xff6b81, emissive: 0x55131f, roughness: 0.28, metalness: 0.45 })
+        );
+        shell.castShadow = true;
+        group.add(shell);
+
+        const blade = new THREE.Mesh(
+          new THREE.TorusGeometry(1.05, 0.07, 8, 36),
+          new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x2f2f43, roughness: 0.35, metalness: 0.9 })
+        );
+        blade.rotation.x = Math.PI / 2;
+        group.add(blade);
+
+        const eye = new THREE.PointLight(0xff6b81, 1.4, 5, 2);
+        eye.position.set(0, 0.15, 0);
+        group.add(eye);
+
+        scene.add(group);
+        world.drones.push({
+          group,
+          blade,
+          center: item.center,
+          radius: item.radius,
+          speed: item.speed,
+          phase: item.phase + idx,
+        });
+      });
+    }
+
+    function createDecorations() {
+      const material = new THREE.MeshStandardMaterial({ color: 0x163557, roughness: 0.92, metalness: 0.08 });
+      const coords = [
+        [-12, -10, 1.8], [-10, 3, 1.3], [-3, -4, 2.4], [6, -12, 2.1], [10, 11, 1.7], [13, -4, 2.5], [1, 11, 1.6],
+      ];
+      coords.forEach(([x, z, h], idx) => {
+        const rock = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, h, 7), material.clone());
+        rock.position.set(x, h / 2, z);
+        rock.rotation.y = idx * 0.7;
+        rock.castShadow = true;
+        rock.receiveShadow = true;
+        scene.add(rock);
+        world.deco.push(rock);
+      });
+    }
+
+    function resetGame(showStart = false) {
+      state.started = false;
+      state.ended = false;
+      state.score = 0;
+      state.timeLeft = config.baseTime;
+      state.playerVelocity.set(0, 0, 0);
+      state.lastHitAt = -Infinity;
+      player.group.position.set(0, 1.15, 0);
+      player.group.rotation.set(0, 0, 0);
+
+      world.collectibles.forEach((item) => {
+        item.active = true;
+        item.root.visible = true;
+      });
+
+      updateHud();
+      if (showStart) {
+        startOverlay.classList.remove('hide');
+        resultOverlay.classList.add('hide');
+      }
+      hideToast();
+      clock.getDelta();
+    }
+
+    function startGame() {
+      resetGame(false);
+      state.started = true;
+      startOverlay.classList.add('hide');
+      resultOverlay.classList.add('hide');
+      showToast('开始收集星核吧，注意躲开红色无人机！');
+    }
+
+    function endGame(victory) {
+      state.ended = true;
+      state.started = false;
+      resultOverlay.classList.remove('hide');
+      resultTitle.textContent = victory ? '任务完成！' : '任务失败';
+      resultText.textContent = victory
+        ? `你成功收集了全部 ${config.totalCollectibles} 个星核，用时 ${(config.baseTime - state.timeLeft).toFixed(1)} 秒。`
+        : state.score === config.totalCollectibles
+          ? '你已达成目标。'
+          : `时间耗尽！你收集了 ${state.score} / ${config.totalCollectibles} 个星核。`;
+    }
+
+    function showToast(message, danger = false) {
+      toastEl.textContent = message;
+      toastEl.classList.toggle('danger', danger);
+      toastEl.classList.add('show');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+    }
+
+    function hideToast() {
+      toastEl.classList.remove('show');
+      clearTimeout(showToast.timer);
+    }
+
+    function updateHud() {
+      scoreEl.textContent = `${state.score} / ${config.totalCollectibles}`;
+      timeEl.textContent = `${Math.max(0, state.timeLeft).toFixed(1)}s`;
+      timeEl.style.color = state.timeLeft <= 10 ? '#ff9aa9' : 'var(--text)';
+    }
+
+    function updatePlayer(delta) {
+      const inputX = (keys['KeyD'] || keys['ArrowRight'] ? 1 : 0) - (keys['KeyA'] || keys['ArrowLeft'] ? 1 : 0);
+      const inputZ = (keys['KeyS'] || keys['ArrowDown'] ? 1 : 0) - (keys['KeyW'] || keys['ArrowUp'] ? 1 : 0);
+      const input = new THREE.Vector3(inputX, 0, inputZ);
+      const speed = config.playerSpeed * (keys['ShiftLeft'] || keys['ShiftRight'] ? config.sprintMultiplier : 1);
+
+      if (input.lengthSq() > 0) {
+        input.normalize();
+        state.playerVelocity.lerp(input.multiplyScalar(speed), 0.14);
+      } else {
+        state.playerVelocity.lerp(new THREE.Vector3(0, 0, 0), 0.18);
+      }
+
+      player.group.position.addScaledVector(state.playerVelocity, delta);
+      player.group.position.x = THREE.MathUtils.clamp(player.group.position.x, -config.arenaHalf, config.arenaHalf);
+      player.group.position.z = THREE.MathUtils.clamp(player.group.position.z, -config.arenaHalf, config.arenaHalf);
+
+      if (state.playerVelocity.lengthSq() > 0.1) {
+        const angle = Math.atan2(state.playerVelocity.x, state.playerVelocity.z);
+        player.group.rotation.y = THREE.MathUtils.lerp(player.group.rotation.y, angle, 0.16);
+      }
+
+      const targetCameraPos = new THREE.Vector3(
+        player.group.position.x,
+        player.group.position.y + 7.2,
+        player.group.position.z + 9.5
+      );
+      camera.position.lerp(targetCameraPos, 0.08);
+      camera.lookAt(player.group.position.x, player.group.position.y + 0.8, player.group.position.z);
+    }
+
+    function updateCollectibles(elapsed) {
+      world.collectibles.forEach((item) => {
+        if (!item.active) return;
+        item.root.rotation.y += 0.02;
+        item.halo.rotation.z += 0.03;
+        item.root.position.y = 1.3 + Math.sin(elapsed * 1.8 + item.floatOffset) * 0.28;
+
+        const dist = item.root.position.distanceTo(player.group.position);
+        if (dist < config.collectibleRadius + config.playerRadius) {
+          item.active = false;
+          item.root.visible = false;
+          state.score += 1;
+          updateHud();
+          showToast(`已收集星核 ${state.score}/${config.totalCollectibles}`);
+          if (state.score >= config.totalCollectibles) {
+            endGame(true);
+          }
+        }
+      });
+    }
+
+    function updateDrones(elapsed) {
+      world.drones.forEach((drone, index) => {
+        const angle = elapsed * drone.speed + drone.phase;
+        drone.group.position.set(
+          drone.center.x + Math.cos(angle) * drone.radius,
+          drone.center.y + Math.sin(elapsed * 2 + index) * 0.25,
+          drone.center.z + Math.sin(angle) * drone.radius
+        );
+        drone.blade.rotation.z += 0.25;
+
+        const dist = drone.group.position.distanceTo(player.group.position);
+        const canHit = elapsed - state.lastHitAt > 1.2;
+        if (canHit && dist < config.droneRadius + config.playerRadius) {
+          state.lastHitAt = elapsed;
+          state.timeLeft = Math.max(0, state.timeLeft - config.hitPenalty);
+          updateHud();
+          showToast(`被无人机击中，减少 ${config.hitPenalty} 秒！`, true);
+        }
+      });
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.elapsedTime;
+
+      ring.rotation.z += 0.0015;
+      world.deco.forEach((rock, idx) => {
+        rock.rotation.y += 0.0008 * (idx % 2 === 0 ? 1 : -1);
+      });
+
+      if (state.started && !state.ended) {
+        state.timeLeft -= delta;
+        updateHud();
+        updatePlayer(delta);
+        updateCollectibles(elapsed);
+        updateDrones(elapsed);
+        if (state.timeLeft <= 0) {
+          state.timeLeft = 0;
+          updateHud();
+          endGame(false);
+        }
+      } else {
+        const orbitRadius = 13;
+        const idleAngle = elapsed * 0.18;
+        camera.position.x = Math.cos(idleAngle) * orbitRadius;
+        camera.position.z = Math.sin(idleAngle) * orbitRadius;
+        camera.position.y = 8 + Math.sin(elapsed * 0.4) * 0.8;
+        camera.lookAt(0, 1.5, 0);
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    window.addEventListener('keydown', (event) => {
+      keys[event.code] = true;
+      if (event.code.startsWith('Arrow') || ['Space', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
+        event.preventDefault();
+      }
+    });
+
+    window.addEventListener('keyup', (event) => {
+      keys[event.code] = false;
+    });
+
+    startBtn.addEventListener('click', startGame);
+    restartBtn.addEventListener('click', startGame);
+    backBtn.addEventListener('click', () => {
+      resetGame(true);
+      resultOverlay.classList.add('hide');
+      startOverlay.classList.remove('hide');
+    });
+
+    animate();
+  </script>
+</body>
+</html>
